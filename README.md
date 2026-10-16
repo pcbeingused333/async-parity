@@ -69,6 +69,10 @@ Found with this approach and reported upstream. Every row was confirmed with a r
 | langchain-aws | [#1395](https://github.com/langchain-ai/langchain-aws/pull/1395) | open | `BedrockLLM` async streaming lost or broke output for several providers |
 | langchain-aws | [#1396](https://github.com/langchain-ai/langchain-aws/pull/1396) | open | `BedrockLLM._acall` refused the default `streaming=False` (private twins) |
 | pymilvus | [#3863](https://github.com/milvus-io/pymilvus/pull/3863) | open | `AsyncGrpcHandler` file resource calls failed on any extra kwarg (twin classes) |
+| crewAI | [#8232](https://github.com/crewAIInc/crewAI/pull/8232) | open | `after_llm_call` hooks skipped on `acall` with the native providers (private twins) |
+| langchain-google | [#2063](https://github.com/langchain-ai/langchain-google/pull/2063) | open | async geocoding made a second, blocking request and ignored comma-separated input |
+| langchain-azure | [#1184](https://github.com/langchain-ai/langchain-azure/pull/1184) | open | `SQLServerVectorStore.aadd_texts` ignored `upsert` |
+| langchain-azure | [#1183](https://github.com/langchain-ai/langchain-azure/issues/1183) | issue | `AzureSearch.asimilarity_search_with_score` forwarded `search_type` to the HTTP client |
 | agno | [#11123](https://github.com/agno-agi/agno/issues/11123) | issue | `async_upsert` deleted old chunks before embedding in 4 vector stores |
 | agno | [#11124](https://github.com/agno-agi/agno/issues/11124) | issue | `Knowledge.asearch` skipped rerankers whose `arerank` has no `limit` |
 | llama_index | [#23549](https://github.com/run-llama/llama_index/issues/23549) | issue | Azure Inference `astream_complete` passed `stream` twice |
