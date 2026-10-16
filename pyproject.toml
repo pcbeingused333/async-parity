@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "async-parity"
+version = "0.1.0"
+description = "Find sync/async method pairs that have drifted apart (a fix applied to one side only)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Alex Castillo González" }]
+keywords = ["asyncio", "static-analysis", "linting", "parity", "ast"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+    "Framework :: AsyncIO",
+]
+dependencies = []
+
+[project.scripts]
+async-parity = "async_parity.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
