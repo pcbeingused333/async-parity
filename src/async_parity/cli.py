@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .core import scan_path
+from .core import scan_paths
 
 DEFAULT_EXCLUDE = ("tests", "test", ".venv", "venv", "node_modules", "build", "dist", ".git")
 
@@ -29,18 +29,17 @@ def main(argv: list[str] | None = None) -> int:
 
     exclude = () if args.include_tests else DEFAULT_EXCLUDE
     found = 0
-    for root in args.paths:
-        for div in scan_path(root, exclude=exclude):
-            # By default only show pairs where the sync body does something the async one doesn't:
-            # those are the ones where a fix most likely landed on one side only.
-            if not args.all and not div.sync_only:
-                continue
-            found += 1
-            if args.summary:
-                print(f"{div.header()}  (+{len(div.async_only)} -{len(div.sync_only)})")
-            else:
-                print(f"\n### {div.header()}")
-                print("\n".join(div.diff[: args.max_lines]))
+    for div in scan_paths(args.paths, exclude=exclude):
+        # By default only show pairs where the sync body does something the async one doesn't:
+        # those are the ones where a fix most likely landed on one side only.
+        if not args.all and not div.sync_only:
+            continue
+        found += 1
+        if args.summary:
+            print(f"{div.header()}  (+{len(div.async_only)} -{len(div.sync_only)})")
+        else:
+            print(f"\n### {div.header()}")
+            print("\n".join(div.diff[: args.max_lines]))
     print(f"\n{found} divergent pair(s)", file=sys.stderr)
     return 1 if found else 0
 

@@ -8,6 +8,8 @@ Python libraries often ship a method and its coroutine twin side by side: `run` 
 - drops docstrings;
 - maps counterpart names (`achat` → `chat`, `run_async` → `run`, `AsyncOpenAI` → `OpenAI`).
 
+It pairs methods inside a class (`x` with `x_async`, `ax`, `a_x`, `async_x`, and private `_x` with `_ax`), and same-named methods of twin classes such as `Client` / `AsyncClient` or `Client` / `ClientAsync`, even when they live in different modules.
+
 The remaining differences are either deliberate or a parity bug.
 
 ## Example
@@ -53,15 +55,25 @@ After the fix, those `except` lines no longer show up in the report.
 
 ## Bugs it has found
 
-These were found with this approach and fixed upstream:
+Found with this approach and reported upstream. Every row was confirmed with a reproduction before it was reported.
 
-| Project | PR | What diverged |
-|---|---|---|
-| Haystack | [#12664](https://github.com/deepset-ai/haystack/pull/12664) | async pipeline re-wrapped nested errors |
-| Haystack | [#12662](https://github.com/deepset-ai/haystack/pull/12662) | `max_workers` ignored by the multi-retrievers' `run_async` |
-| Haystack | [#12663](https://github.com/deepset-ai/haystack/pull/12663) | `encoding_format="float"` missing in `OpenAIDocumentEmbedder.run_async` |
-| Haystack | [#12358](https://github.com/deepset-ai/haystack/pull/12358) | `EmbeddingBasedDocumentSplitter.run_async` fell back to the sync path |
-| haystack-core-integrations | [#3926](https://github.com/deepset-ai/haystack-core-integrations/pull/3926) | `CohereDocumentEmbedder.run_async` didn't batch like the sync path |
+| Project | Link | Status | What diverged |
+|---|---|---|---|
+| Haystack | [#12664](https://github.com/deepset-ai/haystack/pull/12664) | merged | async pipeline re-wrapped nested errors |
+| Haystack | [#12662](https://github.com/deepset-ai/haystack/pull/12662) | merged | `max_workers` ignored by the multi-retrievers' `run_async` |
+| Haystack | [#12663](https://github.com/deepset-ai/haystack/pull/12663) | merged | `encoding_format="float"` missing in `OpenAIDocumentEmbedder.run_async` |
+| Haystack | [#12358](https://github.com/deepset-ai/haystack/pull/12358) | merged | `EmbeddingBasedDocumentSplitter.run_async` fell back to the sync path |
+| haystack-core-integrations | [#3926](https://github.com/deepset-ai/haystack-core-integrations/pull/3926) | merged | `CohereDocumentEmbedder.run_async` didn't batch like the sync path |
+| chatlas | [#455](https://github.com/posit-dev/chatlas/pull/455) | merged | sync generator tools returned the generator object in async chats |
+| OpenInference | [#4066](https://github.com/Arize-ai/openinference/pull/4066) | open | Agent Spec `*_async` span methods raised `NotImplementedError` |
+| langchain-aws | [#1395](https://github.com/langchain-ai/langchain-aws/pull/1395) | open | `BedrockLLM` async streaming lost or broke output for several providers |
+| langchain-aws | [#1396](https://github.com/langchain-ai/langchain-aws/pull/1396) | open | `BedrockLLM._acall` refused the default `streaming=False` (private twins) |
+| pymilvus | [#3863](https://github.com/milvus-io/pymilvus/pull/3863) | open | `AsyncGrpcHandler` file resource calls failed on any extra kwarg (twin classes) |
+| agno | [#11123](https://github.com/agno-agi/agno/issues/11123) | issue | `async_upsert` deleted old chunks before embedding in 4 vector stores |
+| agno | [#11124](https://github.com/agno-agi/agno/issues/11124) | issue | `Knowledge.asearch` skipped rerankers whose `arerank` has no `limit` |
+| llama_index | [#23549](https://github.com/run-llama/llama_index/issues/23549) | issue | Azure Inference `astream_complete` passed `stream` twice |
+| llama_index | [#23550](https://github.com/run-llama/llama_index/issues/23550) | issue | HuggingFace API async client closed after one stream |
+| llama_index | [#23552](https://github.com/run-llama/llama_index/issues/23552) | issue | `OpenAIResponses.achat` dropped reasoning items (private twins) |
 
 ## Install and use
 
@@ -76,7 +88,8 @@ Test directories are skipped unless you pass `--include-tests`. The exit code is
 
 ## Limitations
 
-- It only pairs methods within the same class, by name (`x` with `x_async`, `ax`, `a_x` or `async_x`).
+- Pairing is by name only. Twin classes must be named `Async<Name>` or `<Name>Async`, and when two modules define the same class name, the first one scanned wins.
+- Generated code (sync clients produced from async ones with tools like `unasync`) never diverges, so scanning it is wasted time.
 - Most reports are deliberate differences: `asyncio.to_thread`, a different client object, an async-only lock. It's a reading list, not a verdict. The default filter (only show pairs where the sync side has something the async side lacks) cuts most of the noise.
 - Thin wrappers that delegate to different helpers (`return _impl.run(...)` vs `return _impl.arun(...)`) are reported when the helper names don't follow the counterpart conventions.
 

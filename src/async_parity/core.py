@@ -19,6 +19,9 @@ from pathlib import Path
 # Names a coroutine function commonly takes relative to its sync twin.
 PARTNER_PATTERNS = ("{}_async", "a{}", "a_{}", "async_{}")
 
+# Names an async twin class commonly takes: `Client` / `AsyncClient` / `ClientAsync`.
+TWIN_CLASS_PATTERNS = ("Async{}", "{}Async")
+
 # Prefixes/suffixes that mark the async counterpart of an identifier.
 # Leading underscores are kept, so `_aclient` maps to `_client`.
 _ASYNC_FORMS = (
@@ -135,16 +138,68 @@ def normalized_pair(
     return lines(sync_copy), lines(async_copy)
 
 
+def _methods(cls: ast.ClassDef) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    return {f.name: f for f in cls.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _partner_names(name: str) -> Iterator[str]:
+    yield from (pattern.format(name) for pattern in PARTNER_PATTERNS)
+    if name.startswith("_") and not name.startswith("__"):
+        # Private twins put the "a" after the underscore: `_stream` / `_astream`, `_call` / `_acall`.
+        yield "_a" + name.lstrip("_")
+
+
 def _pairs(cls: ast.ClassDef) -> Iterator[tuple[ast.FunctionDef, ast.AsyncFunctionDef | ast.FunctionDef]]:
-    methods = {f.name: f for f in cls.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    methods = _methods(cls)
     for name, fn in methods.items():
         if name.startswith("__") or isinstance(fn, ast.AsyncFunctionDef):
             continue
-        for pattern in PARTNER_PATTERNS:
-            partner = methods.get(pattern.format(name))
+        for partner_name in _partner_names(name):
+            partner = methods.get(partner_name)
             if partner is not None and partner is not fn:
                 yield fn, partner
                 break
+
+
+def _diverges(
+    path: Path,
+    cls: str,
+    sync_fn: ast.FunctionDef,
+    async_fn: ast.AsyncFunctionDef | ast.FunctionDef,
+    async_label: str,
+) -> Divergence | None:
+    a, b = normalized_pair(sync_fn, async_fn)
+    diff = list(difflib.unified_diff(a, b, sync_fn.name, async_label, n=1, lineterm=""))
+    return Divergence(path, cls, sync_fn.name, async_label, diff) if diff else None
+
+
+def _within_classes(tree: ast.AST, path: Path) -> Iterator[Divergence]:
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        for sync_fn, async_fn in _pairs(cls):
+            div = _diverges(path, cls.name, sync_fn, async_fn, async_fn.name)
+            if div:
+                yield div
+
+
+def _across_twin_classes(classes: dict[str, tuple[Path, ast.ClassDef]]) -> Iterator[Divergence]:
+    """Compare same-named methods of `Client` and its `AsyncClient` twin, wherever each is defined."""
+    for name, (path, cls) in classes.items():
+        for pattern in TWIN_CLASS_PATTERNS:
+            twin = classes.get(pattern.format(name))
+            if twin is None:
+                continue
+            twin_methods = _methods(twin[1])
+            for method_name, fn in _methods(cls).items():
+                partner = twin_methods.get(method_name)
+                if method_name.startswith("__") or isinstance(fn, ast.AsyncFunctionDef) or partner is None:
+                    continue
+                div = _diverges(path, name, fn, partner, f"{twin[1].name}.{method_name}")
+                if div:
+                    yield div
+
+
+def _classes(tree: ast.AST, path: Path) -> dict[str, tuple[Path, ast.ClassDef]]:
+    return {n.name: (path, n) for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
 
 
 def scan_source(source: str, path: Path = Path("<string>")) -> Iterator[Divergence]:
@@ -152,21 +207,30 @@ def scan_source(source: str, path: Path = Path("<string>")) -> Iterator[Divergen
         tree = ast.parse(source)
     except SyntaxError:
         return
-    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
-        for sync_fn, async_fn in _pairs(cls):
-            a, b = normalized_pair(sync_fn, async_fn)
-            diff = list(difflib.unified_diff(a, b, sync_fn.name, async_fn.name, n=1, lineterm=""))
-            if diff:
-                yield Divergence(path, cls.name, sync_fn.name, async_fn.name, diff)
+    yield from _within_classes(tree, path)
+    yield from _across_twin_classes(_classes(tree, path))
 
 
 def scan_path(root: Path, exclude: tuple[str, ...] = ()) -> Iterator[Divergence]:
-    files = [root] if root.is_file() else sorted(root.rglob("*.py"))
+    return scan_paths([root], exclude)
+
+
+def scan_paths(roots: list[Path], exclude: tuple[str, ...] = ()) -> Iterator[Divergence]:
+    """Scan every file, then compare twin classes across all of them.
+
+    `Client` and `AsyncClient` often live in different modules, so twins are matched by class name
+    over all scanned files. The first definition of a name wins.
+    """
+    files = [f for root in roots for f in ([root] if root.is_file() else sorted(root.rglob("*.py")))]
+    classes: dict[str, tuple[Path, ast.ClassDef]] = {}
     for path in files:
         if any(part in exclude for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
             continue
-        yield from scan_source(source, path)
+        yield from _within_classes(tree, path)
+        for name, entry in _classes(tree, path).items():
+            classes.setdefault(name, entry)
+    yield from _across_twin_classes(classes)

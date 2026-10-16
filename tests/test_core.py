@@ -98,6 +98,93 @@ def test_argument_dropped_on_async_side_is_reported():
     assert div.sync_only == ["return self.client.create(input=texts, encoding_format='float')"]
 
 
+def test_private_twins_are_paired():
+    # The shape of langchain-ai/langchain-aws#1396: `_call` handles the default case, `_acall`
+    # refuses it.
+    (div,) = divergences(
+        """
+        class BedrockLLM:
+            def _call(self, prompt):
+                if not self.streaming:
+                    return self._invoke(prompt)
+                return self._stream_text(prompt)
+
+            async def _acall(self, prompt):
+                if not self.streaming:
+                    raise ValueError("Streaming must be set to True for async operations.")
+                return await self._astream_text(prompt)
+        """
+    )
+    assert (div.sync_name, div.async_name) == ("_call", "_acall")
+    assert [line.strip() for line in div.sync_only] == ["return self._invoke(prompt)"]
+
+
+def test_dunder_methods_are_not_paired_as_private_twins():
+    assert not divergences(
+        """
+        class Stream:
+            def __iter__(self):
+                return iter(self.items)
+
+            def __aiter__(self):
+                return self
+        """
+    )
+
+
+def test_twin_classes_are_compared_method_by_method():
+    # The shape of milvus-io/pymilvus#3863: the async handler unpacks the caller's kwargs into a
+    # helper that only takes the call context.
+    (div,) = divergences(
+        """
+        class GrpcHandler:
+            def add_file_resource(self, name, path, timeout=None, **kwargs):
+                req = Prepare.add_file_resource(name=name, path=path)
+                resp = self._stub.AddFileResource(req, timeout=timeout, metadata=_api_level_md(kwargs.get("context")))
+                check_status(resp)
+
+            def list_file_resources(self, timeout=None, **kwargs):
+                return self._stub.ListFileResources(Prepare.list_file_resources(), timeout=timeout)
+
+
+        class AsyncGrpcHandler:
+            async def add_file_resource(self, name, path, timeout=None, **kwargs):
+                req = Prepare.add_file_resource(name=name, path=path)
+                resp = await self._async_stub.AddFileResource(req, timeout=timeout, metadata=_api_level_md(**kwargs))
+                check_status(resp)
+
+            async def list_file_resources(self, timeout=None, **kwargs):
+                return await self._async_stub.ListFileResources(Prepare.list_file_resources(), timeout=timeout)
+        """
+    )
+    assert div.header() == "<string>:GrpcHandler.add_file_resource vs AsyncGrpcHandler.add_file_resource"
+    assert any("kwargs.get('context')" in line for line in div.sync_only)
+
+
+def test_twin_classes_in_different_files_are_compared(tmp_path: Path):
+    (tmp_path / "sync_client.py").write_text(
+        dedent(
+            """
+            class Client:
+                def search(self, query, limit=10):
+                    return self._http.get("/search", params={"q": query, "limit": limit})
+            """
+        )
+    )
+    (tmp_path / "async_client.py").write_text(
+        dedent(
+            """
+            class AsyncClient:
+                async def search(self, query, limit=10):
+                    return await self._http.get("/search", params={"q": query})
+            """
+        )
+    )
+    (div,) = scan_path(tmp_path)
+    assert (div.cls, div.async_name) == ("Client", "AsyncClient.search")
+    assert div.path == tmp_path / "sync_client.py"
+
+
 def test_docstrings_are_ignored():
     assert not divergences(
         '''
@@ -146,3 +233,15 @@ def test_cli_exit_code_and_summary(tmp_path: Path, capsys):
     )
     assert main([str(tmp_path), "--summary"]) == 1
     assert "bad.py:C.run vs arun" in capsys.readouterr().out
+
+
+def test_cli_pairs_twin_classes_given_as_separate_files(tmp_path: Path, capsys):
+    sync_file, async_file = tmp_path / "client.py", tmp_path / "aclient.py"
+    sync_file.write_text(
+        "class Client:\n    def get(self, key):\n        return self._db.get(key, consistent=True)\n"
+    )
+    async_file.write_text(
+        "class AsyncClient:\n    async def get(self, key):\n        return await self._db.get(key)\n"
+    )
+    assert main([str(sync_file), str(async_file), "--summary"]) == 1
+    assert "Client.get vs AsyncClient.get" in capsys.readouterr().out
