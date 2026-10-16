@@ -66,7 +66,7 @@ These were found with this approach and fixed upstream:
 ## Install and use
 
 ```console
-pip install git+https://github.com/<you>/async-parity
+pip install git+https://github.com/pcbeingused333/async-parity
 async-parity path/to/package            # pairs where the sync side does something the async side doesn't
 async-parity path/to/package --summary  # one line per pair
 async-parity path/to/package --all      # every divergent pair
